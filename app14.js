@@ -5,4 +5,32 @@ async function savePackingSuggestions(){let u=await need(),items=(window._packSu
 async function addPack(){let u=await need(),item=$('packItem').value.trim();if(!item)return;await sb.from('packing_items').insert({user_id:u.id,trip_id:trip.id,item,category:$('packCat').value,quantity:1,packed:false});renderPacking()}
 window.togglePacked=async(id,v)=>{await sb.from('packing_items').update({packed:v}).eq('id',id)};window.deletePack=async id=>{await sb.from('packing_items').delete().eq('id',id);renderPacking()};
 async function renderSimple(t){$('tabbody').innerHTML='<div class="panel muted">해당 기능을 준비 중입니다.</div>'}
-$('agen').onclick=async()=>{let b=$('agen');try{let u=await need(),dest=$('ad').value.trim(),d=+$('adays').value;if(!dest||!d)throw Error('목적지와 여행 일수를 입력하세요');b.disabled=true;M('amsg','AI 일정 생성 중...');let {data:{session}}=await sb.auth.getSession(),r=await fetch(PLAN,{method:'POST',headers:{'Content-Type':'application/json','apikey':K,'Authorization':'Bearer '+session.access_token},body:JSON.stringify({destination:dest,days:d,nights:d-1,extraRequest:$('ar').value.trim()})}),j=await r.json();if(!r.ok)throw Error([j.error,j.detail].filter(Boolean).join(' - '));let p=j.plan,dd=days($('as').value,$('ae').value),{data:t,error}=await sb.from('trips').insert({user_id:u.id,title:p.title||`${dest} ${d}일 여행`,destination:dest,start_date:$('as').value||null,end_date:$('ae').value||null,days:dd||d,nights:(dd||d)-1,travelers_count:+$('at').value||1,extra_request:$('ar').value.trim()||null,ai_plan:j.text||JSON.stringify(p),ai_grounding:j.grounding||null}).select().single();if(error)throw error;let rows=[];(p.days||[]).forEach(D=>(D.items||[]).forEach((i,k)=>{let f=i.from_previous||{};rows.push({user_id:u.id,trip_id:t.id,day_no:D.day,start_time:i.time||null,title:i.title||i.place||'일정',place:i.place||null,item_type:i.item_type||'activity',transport:f.mode||i.transport||null,travel_duration_min:f.duration_min??null,travel_distance_km:f.distance_km??null,travel_cost:f.estimated_fare??null,estimated_cost:i.estimated_cost??null,currency:i.currency||f.currency||p.currency||null,meal_type:i.meal_type||null,restaurant_suggestions:i.restaurant_suggestions||[],notes:i.notes||null,sort_order:k})}));if(rows.length){let {error:x}=await sb.from('itinerary_items').insert(rows);if(x)throw x}trip=t;go('trips');await loadTrips();await openTrip(t.id)}catch(x){M('amsg',x.message,'error')}finally{b.disabled=false;M('amsg','')}};authUI();home();
+function showTripAiRequest(){
+  if(!trip)return;
+  $('scheduleModal').classList.remove('hidden');
+  $('scheduleModalTitle').textContent='AI 일정 새로 생성';
+  $('scheduleModalBody').innerHTML=`<div class="panel"><div class="muted" style="margin-bottom:12px">현재 여행정보를 기준으로 일정을 다시 만듭니다.<br><b>${e(trip.destination)}</b> · ${e(trip.start_date||'날짜 미정')} ~ ${e(trip.end_date||'')} · ${trip.travelers_count||1}명</div><div class="field"><label>추가 요청사항</label><textarea id="regenReq" placeholder="예: 쇼핑 시간을 넉넉히, 맛집 위주, 아이 동반, 하루 일정은 여유롭게 등">${e(trip.extra_request||'')}</textarea></div><label style="display:flex;gap:8px;align-items:center;margin:10px 0 16px"><input type="checkbox" id="regenNone"> 별도의 요청사항 없음</label><div class="msg" style="background:#fff8e8;color:#7a5a00">새로 생성하면 기존 일정은 새 AI 일정으로 교체됩니다. 예약·경비·준비물 데이터는 유지됩니다.</div><div class="actions" style="margin-top:14px"><button class="btn" id="regenStart">AI 일정 생성</button><button class="small" id="regenCancel">취소</button></div><div id="regenMsg"></div></div>`;
+  $('regenCancel').onclick=closeScheduleModal;
+  $('regenNone').onchange=()=>{$('regenReq').disabled=$('regenNone').checked;if($('regenNone').checked)$('regenReq').value=''};
+  $('regenStart').onclick=regenerateTripAi;
+}
+async function regenerateTripAi(){
+  const b=$('regenStart');
+  try{
+    let u=await need();
+    let {data:{session}}=await sb.auth.getSession();
+    if(!session)throw Error('로그인이 필요합니다.');
+    if(!trip.destination||!trip.days)throw Error('여행지와 여행기간을 먼저 저장해 주세요.');
+    const extra=$('regenNone').checked?'':$('regenReq').value.trim();
+    b.disabled=true;b.textContent='AI 일정 생성 중...';M('regenMsg','여행정보와 요청사항을 반영해 새 일정을 만들고 있습니다...');
+    let r=await fetch(PLAN,{method:'POST',headers:{'Content-Type':'application/json','apikey':K,'Authorization':'Bearer '+session.access_token},body:JSON.stringify({destination:trip.destination,days:trip.days,nights:trip.nights??Math.max(0,trip.days-1),extraRequest:extra,start_date:trip.start_date,end_date:trip.end_date,travelers_count:trip.travelers_count})});
+    let j=await r.json();if(!r.ok)throw Error([j.error,j.detail].filter(Boolean).join(' - ')||'AI 일정 생성 실패');
+    let p=j.plan,rows=[];(p.days||[]).forEach(D=>(D.items||[]).forEach((i,k)=>{let f=i.from_previous||{};rows.push({user_id:u.id,trip_id:trip.id,day_no:D.day,start_time:i.time||null,title:i.title||i.place||'일정',place:i.place||null,item_type:i.item_type||'activity',transport:f.mode||i.transport||null,travel_duration_min:f.duration_min??null,travel_distance_km:f.distance_km??null,travel_cost:f.estimated_fare??null,estimated_cost:i.estimated_cost??null,currency:i.currency||f.currency||p.currency||null,meal_type:i.meal_type||null,restaurant_suggestions:i.restaurant_suggestions||[],notes:i.notes||null,sort_order:k})}));
+    if(!rows.length)throw Error('AI가 생성한 일정이 비어 있습니다. 다시 시도해 주세요.');
+    let {error:de}=await sb.from('itinerary_items').delete().eq('trip_id',trip.id);if(de)throw de;
+    let {error:ie}=await sb.from('itinerary_items').insert(rows);if(ie)throw ie;
+    let {data:updated,error:ue}=await sb.from('trips').update({extra_request:extra||null,ai_plan:j.text||JSON.stringify(p),ai_grounding:j.grounding||null}).eq('id',trip.id).select().single();if(ue)throw ue;trip=updated;
+    closeScheduleModal();tab='itinerary';renderDetail();
+  }catch(x){M('regenMsg',x.message,'error')}finally{if(b){b.disabled=false;b.textContent='AI 일정 생성'}}
+}
+authUI();home();
