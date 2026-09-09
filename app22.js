@@ -16,10 +16,17 @@ function attractionGuideCandidate(item) {
   return /activity|attraction|관광|관람|탐방|공원|박물관|궁|성|거리|광장|리조트/i.test(text) && !/공항|항공|숙소|호텔|식사|점심|저녁|아침|체크인|체크아웃/i.test(text);
 }
 
+const GUIDE_IMAGE_OVERRIDES = {
+  '천안문 광장':'https://upload.wikimedia.org/wikipedia/commons/thumb/4/43/Front_view_of_Tiananmen_gate_from_north_end_of_Tiananmen_Square.jpg/1280px-Front_view_of_Tiananmen_gate_from_north_end_of_Tiananmen_Square.jpg',
+  '자금성(고궁박물원)':'https://commons.wikimedia.org/wiki/Special:FilePath/China%20(Beijing%2C%20Forbidden%20City)%20Outer%20court%20and%20the%20Hall%20of%20Supreme%20Harmony1%20(38940482985).jpg?width=1400',
+  '경산공원(징산공원)':'https://chinatripedia.com/wp-content/uploads/2023/03/wanchun-pavilion-in-jingshan-park-jpg.webp',
+  '자금성 전경 감상':'https://upload.wikimedia.org/wikipedia/commons/thumb/d/d8/2017-05-07_The_Forbidden_City.jpg/1280px-2017-05-07_The_Forbidden_City.jpg',
+};
+
 function guidesForItem(item) {
   const text = `${item.title || ''} ${item.place || ''}`;
   const found = ATTRACTION_GUIDES.filter(guide => guide.match.test(text) && !(guide.exclude && guide.exclude.test(text)));
-  if (found.length) return found;
+  if (found.length) return found.map(guide => ({...guide,image:GUIDE_IMAGE_OVERRIDES[guide.title] || guide.image}));
   return [{eyebrow:`${trip.destination || 'TRAVEL'} · PLACE GUIDE`,title:item.place || item.title,image:typeof homeTripImage === 'function' ? homeTripImage(trip) : 'https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1400&q=85',summary:`${item.place || item.title}에서 여행지의 분위기와 문화를 경험할 수 있는 일정입니다.`,points:['주요 관람 지점과 이동 방향을 먼저 확인하면 시간을 효율적으로 사용할 수 있습니다.','현장 운영시간과 입장·예약 조건은 방문 전에 다시 확인하세요.','추천 맛집과 쇼핑 장소를 선택하면 일별 지도에 경유지로 함께 표시됩니다.'],tip:item.notes || '혼잡 시간과 다음 일정까지의 이동시간을 고려해 여유 있게 관람하세요.'}];
 }
 
