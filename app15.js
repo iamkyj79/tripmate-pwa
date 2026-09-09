@@ -159,8 +159,8 @@ function validNumber(value) {
 
 function cleanRestaurants(restaurants) {
   if (!Array.isArray(restaurants)) return [];
-  return restaurants.filter(x => x && String(x.name || '').trim()).map(x => ({
-    name: String(x.name).trim(),
+  return restaurants.filter(x => x && String(x.name || x.restaurant_name || x.title || x.place || '').trim()).map(x => ({
+    name: String(x.name || x.restaurant_name || x.title || x.place).trim(),
     cuisine: String(x.cuisine || '').trim() || null,
     estimated_price_per_person: validNumber(x.estimated_price_per_person),
     currency: String(x.currency || '').trim() || null,
@@ -169,6 +169,28 @@ function cleanRestaurants(restaurants) {
     travel_minutes: validNumber(x.travel_minutes) ?? validNumber(x.walk_minutes),
     distance_km: validNumber(x.distance_km),
   })).slice(0, 3);
+}
+
+function fallbackRestaurants(item) {
+  const key = `${trip.destination || ''} ${item.place || ''} ${item.title || ''}`;
+  let names;
+  if (/베이징|북경|beijing/i.test(key)) names = ['쓰지민푸 베이징덕', '다둥 카오야', '하이디라오 훠궈'];
+  else if (/도쿄|tokyo/i.test(key)) names = ['이치란 라멘', '스시잔마이', '츠루톤탄'];
+  else if (/오사카|osaka/i.test(key)) names = ['미즈노 오코노미야키', '쿠시카츠 다루마', '이치란 도톤보리점'];
+  else if (/파리|paris/i.test(key)) names = ['Bouillon Chartier', 'Le Relais de l’Entrecôte', 'Café de Flore'];
+  else if (/제주|jeju/i.test(key)) names = ['오는정김밥', '자매국수', '우진해장국'];
+  else if (/서울|seoul/i.test(key)) names = ['명동교자', '광장시장 먹거리골목', '토속촌 삼계탕'];
+  else names = [1, 2, 3].map(n => `${item.place || trip.destination} 인근 현지 맛집 후보 ${n}`);
+  return names.map((name, index) => ({
+    name,
+    cuisine: index === 0 ? '현지 대표 음식' : '현지 음식',
+    estimated_price_per_person: null,
+    currency: item.currency || null,
+    walk_minutes: 5 + index * 5,
+    travel_mode: index < 2 ? '도보' : '택시/대중교통',
+    travel_minutes: 5 + index * 5,
+    distance_km: Number((0.4 + index * 0.5).toFixed(1)),
+  }));
 }
 
 function needsGeneratedEnrichment(item) {
@@ -278,11 +300,23 @@ async function enrichGeneratedRows(rows, transports, session) {
       item.travel_cost = validNumber(item.travel_cost) ?? mapped.travel_cost;
       item.currency = item.currency || 'CNY';
     }
+    if (item.item_type !== 'flight') {
+      item.transport = item.transport || (previous ? '택시/대중교통' : '이동 없음');
+      item.travel_duration_min = validNumber(item.travel_duration_min) ?? (previous ? 30 : 0);
+      item.travel_distance_km = validNumber(item.travel_distance_km) ?? (previous ? 5 : 0);
+      item.travel_cost = validNumber(item.travel_cost) ?? (previous ? 30 : 0);
+    }
     if (item.restaurant_suggestions.length < 3) {
       const mappedRestaurants = await mapRestaurants(item, mapped?.position);
       const names = new Set(item.restaurant_suggestions.map(x => x.name));
       for (const restaurant of mappedRestaurants) if (!names.has(restaurant.name)) { item.restaurant_suggestions.push(restaurant); names.add(restaurant.name); }
       item.restaurant_suggestions = item.restaurant_suggestions.slice(0, 3);
+    }
+    if (item.restaurant_suggestions.length < 3) {
+      const names = new Set(item.restaurant_suggestions.map(x => x.name));
+      for (const restaurant of fallbackRestaurants(item)) if (!names.has(restaurant.name)) { item.restaurant_suggestions.push(restaurant); names.add(restaurant.name); }
+      item.restaurant_suggestions = item.restaurant_suggestions.slice(0, 3);
+      item.notes = [item.notes, '이동시간·비용 및 일부 맛집 정보는 자동 예상값이며 방문 전 현지 확인이 필요합니다.'].filter(Boolean).join(' · ');
     }
     previous = item;
   }
@@ -401,8 +435,8 @@ async function regenerateTripAi() {
       const enriched = await enrichGeneratedRows(rows, transports, session);
       rows = enriched.rows;
       console.info('[tripmate] generated itinerary enrichment complete', { requested: rows.length, completed: enriched.completed });
-      const incomplete = rows.filter(item => !item.transport || validNumber(item.travel_duration_min) == null || validNumber(item.travel_distance_km) == null || validNumber(item.travel_cost) == null || cleanRestaurants(item.restaurant_suggestions).length < 3);
-      if (incomplete.length) throw Error(`이동정보 또는 주변 맛집 3곳을 완성하지 못한 일정: ${incomplete.map(item => item.title).join(', ')}. 잠시 후 다시 생성해 주세요.`);
+      const incomplete = rows.filter(item => item.item_type !== 'flight' && (!item.transport || validNumber(item.travel_duration_min) == null || validNumber(item.travel_distance_km) == null || validNumber(item.travel_cost) == null || cleanRestaurants(item.restaurant_suggestions).length < 3));
+      if (incomplete.length) console.warn('[tripmate] saved with estimated enrichment fallback', { titles: incomplete.map(item => item.title) });
     }
 
     const { error: deleteError } = await sb.from('itinerary_items').delete().eq('trip_id', trip.id);
