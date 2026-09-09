@@ -2,13 +2,13 @@
 const PLACE_LOOKUPS={
   '천안문 광장':{ko:'천안문 광장',en:'Tiananmen Square',zh:'天安门广场'},
   '자금성(고궁박물원)':{ko:'자금성',en:'Forbidden City',zh:'故宫'},
-  '경산공원(징산공원)':{ko:'경산공원 베이징',en:'Jingshan Park',zh:'景山公园'},
+  '경산공원(징산공원)':{ko:'징산 공원',en:'Jingshan Park',zh:'景山公园'},
   '자금성 전경 감상':{ko:'자금성',en:'Forbidden City',zh:'故宫'},
-  '이화원':{ko:'이화원 베이징',en:'Summer Palace Beijing',zh:'颐和园'},
+  '이화원':{ko:'이화원',en:'Summer Palace',zh:'颐和园'},
   '유니버설 베이징 리조트':{ko:'유니버설 베이징 리조트',en:'Universal Beijing Resort',zh:'北京环球度假区'},
-  '전문대가리·다스란':{ko:'전문대가 베이징',en:'Qianmen Beijing',zh:'前门大街'},
+  '전문대가리·다스란':{ko:'전문대가',en:'Qianmen',zh:'前门大街'},
   '왕푸징 거리':{ko:'왕푸징',en:'Wangfujing',zh:'王府井'},
-  '천단공원':{ko:'천단 베이징',en:'Temple of Heaven',zh:'天坛'},
+  '천단공원':{ko:'천단',en:'Temple of Heaven',zh:'天坛'},
 };
 const VERIFIED_PLACE_IMAGES={
   '이화원':'https://upload.wikimedia.org/wikipedia/commons/d/db/Longevity_Hill_of_the_Summer_Palace.jpg',
@@ -30,12 +30,36 @@ function automaticGuidesForItem(item){
 function wikiSentences(text){
   return String(text||'').replace(/\s+/g,' ').trim().match(/[^.!?。！？]+[.!?。！？]?/g)||[];
 }
-async function wikiSearch(language,term){
+function normalizedGuideTerm(value){
+  return String(value||'').toLocaleLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}]/gu,'');
+}
+function validWikiPage(page){return page&&!page.missing&&String(page.extract||'').length>80}
+async function wikiExact(language,title){
+  const params=new URLSearchParams({action:'query',format:'json',origin:'*',titles:title,prop:'extracts|pageimages|info',exintro:'1',explaintext:'1',piprop:'thumbnail',pithumbsize:'1400',inprop:'url',redirects:'1'});
+  const response=await fetch(`https://${language}.wikipedia.org/w/api.php?${params}`);
+  if(!response.ok)throw Error('Wikipedia lookup failed');
+  const data=await response.json();
+  return Object.values(data?.query?.pages||{}).find(validWikiPage)||null;
+}
+async function wikiSearch(language,term,expectedTitle,city){
   const params=new URLSearchParams({action:'query',format:'json',origin:'*',generator:'search',gsrsearch:term,gsrlimit:'5',prop:'extracts|pageimages|info',exintro:'1',explaintext:'1',piprop:'thumbnail',pithumbsize:'1400',inprop:'url',redirects:'1'});
   const response=await fetch(`https://${language}.wikipedia.org/w/api.php?${params}`);
   if(!response.ok)throw Error('Wikipedia search failed');
   const data=await response.json();
-  return Object.values(data?.query?.pages||{}).sort((a,b)=>(a.index||99)-(b.index||99)).find(page=>String(page.extract||'').length>80)||null;
+  const expected=normalizedGuideTerm(expectedTitle),cityKey=normalizedGuideTerm(city);
+  const ranked=Object.values(data?.query?.pages||{}).filter(validWikiPage).map(page=>{
+    const title=normalizedGuideTerm(page.title);
+    let score=title===expected?100:title.includes(expected)?75:expected.includes(title)&&title.length>=3?55:0;
+    if(cityKey&&title===cityKey&&title!==expected)score=-100;
+    return {page,score};
+  }).sort((a,b)=>b.score-a.score||(a.page.index||99)-(b.page.index||99));
+  return ranked[0]?.score>=55?ranked[0].page:null;
+}
+function usablePageImage(page){
+  const source=page?.thumbnail?.source||'';
+  if(!source)return null;
+  let decoded=source;try{decoded=decodeURIComponent(source)}catch(_){}
+  return /(?:map|locator|location_map|administrative|flag|seal|logo|emblem|diagram)/i.test(decoded)?null:source;
 }
 async function commonsImage(term){
   try{
@@ -54,13 +78,18 @@ async function resolveAccurateGuide(guide){
   const lookup=PLACE_LOOKUPS[guide.title]||{ko:place,en:place,zh:place};
   let page=null,language='ko';
   for(const lang of ['ko','en','zh']){
-    try{page=await wikiSearch(lang,`${lookup[lang]||lookup.ko} ${city}`.trim());if(page){language=lang;break}}catch(_){}
+    const exactTitle=lookup[lang]||lookup.ko;
+    try{
+      page=await wikiExact(lang,exactTitle);
+      if(!page)page=await wikiSearch(lang,`${exactTitle} ${city}`.trim(),exactTitle,city);
+      if(page){language=lang;break}
+    }catch(_){}
   }
   if(!page)return {...guide,image:VERIFIED_PLACE_IMAGES[guide.title]||null,loadFailed:true};
   const sentences=wikiSentences(page.extract),summary=sentences.slice(0,2).join(' ').slice(0,430);
   const facts=sentences.slice(2,5).map(value=>value.trim()).filter(value=>value.length>20);
-  let image=page.thumbnail?.source||VERIFIED_PLACE_IMAGES[guide.title]||null;
-  if(!image)image=await commonsImage(`${lookup.en||lookup.ko} ${city}`.trim());
+  let image=VERIFIED_PLACE_IMAGES[guide.title]||usablePageImage(page);
+  if(!image)image=await commonsImage(lookup.en||lookup.ko);
   return {...guide,title:guide.title,summary:summary||guide.summary,points:facts.length?facts:guide.points,image,sourceUrl:page.fullurl||`https://${language}.wikipedia.org/?curid=${page.pageid}`,sourceLabel:`Wikipedia · ${page.title}`,loadFailed:false};
 }
 function accurateGuideCard(guide,index,total){
