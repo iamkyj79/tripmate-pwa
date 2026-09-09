@@ -21,10 +21,11 @@ function cleanGuidePlaceName(value){
 function automaticGuidesForItem(item){
   const known=guidesForItem(item);
   const isGeneric=known.length===1&&!ATTRACTION_GUIDES.some(value=>value.title===known[0].title);
-  if(!isGeneric)return known;
-  const parts=String(item.title||item.place||'').split(/\s+(?:및|그리고|와|과)\s+|[&/+·]/).map(cleanGuidePlaceName).filter(value=>value.length>1);
-  const names=[...new Set(parts.length>1?parts:[cleanGuidePlaceName(item.place||item.title)])];
-  return names.map(name=>({...known[0],title:name,summary:`${name}에 대한 여행 안내자료를 불러오고 있습니다.`}));
+  if(!isGeneric)return known.map(guide=>({...guide,searchName:PLACE_LOOKUPS[guide.title]?.ko||guide.title}));
+  const safePlace=cleanGuidePlaceName(item.place||'').slice(0,80);
+  if(!safePlace)return [{...known[0],searchDisabled:true,image:null,summary:'장소 정보가 없어 외부 검색을 실행하지 않았습니다. 일정 수정에서 관광지 장소명을 입력해 주세요.'}];
+  const names=[...new Set(safePlace.split(/\s+(?:및|그리고|와|과)\s+|[&/+·]/).map(cleanGuidePlaceName).filter(value=>value.length>1))];
+  return names.map(name=>({...known[0],title:name,searchName:name,summary:`${name}에 대한 여행 안내자료를 불러오고 있습니다.`}));
 }
 function wikiSentences(text){
   return String(text||'').replace(/\s+/g,' ').trim().match(/[^.!?。！？]+[.!?。！？]?/g)||[];
@@ -47,16 +48,19 @@ async function commonsImage(term){
   }catch(_){return null}
 }
 async function resolveAccurateGuide(guide){
-  const lookup=PLACE_LOOKUPS[guide.title]||{ko:`${guide.title} ${trip.destination||''}`,en:`${guide.title} ${trip.destination||''}`,zh:`${guide.title} ${trip.destination||''}`};
+  if(guide.searchDisabled)return {...guide,loadFailed:true};
+  const city=String(trip.destination||'').slice(0,80);
+  const place=String(guide.searchName||guide.title||'').slice(0,80);
+  const lookup=PLACE_LOOKUPS[guide.title]||{ko:place,en:place,zh:place};
   let page=null,language='ko';
   for(const lang of ['ko','en','zh']){
-    try{page=await wikiSearch(lang,lookup[lang]||lookup.ko);if(page){language=lang;break}}catch(_){}
+    try{page=await wikiSearch(lang,`${lookup[lang]||lookup.ko} ${city}`.trim());if(page){language=lang;break}}catch(_){}
   }
   if(!page)return {...guide,image:VERIFIED_PLACE_IMAGES[guide.title]||null,loadFailed:true};
   const sentences=wikiSentences(page.extract),summary=sentences.slice(0,2).join(' ').slice(0,430);
   const facts=sentences.slice(2,5).map(value=>value.trim()).filter(value=>value.length>20);
   let image=page.thumbnail?.source||VERIFIED_PLACE_IMAGES[guide.title]||null;
-  if(!image)image=await commonsImage(lookup.en||lookup.ko);
+  if(!image)image=await commonsImage(`${lookup.en||lookup.ko} ${city}`.trim());
   return {...guide,title:guide.title,summary:summary||guide.summary,points:facts.length?facts:guide.points,image,sourceUrl:page.fullurl||`https://${language}.wikipedia.org/?curid=${page.pageid}`,sourceLabel:`Wikipedia · ${page.title}`,loadFailed:false};
 }
 function accurateGuideCard(guide,index,total){
