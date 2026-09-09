@@ -193,9 +193,41 @@ function fallbackRestaurants(item) {
   }));
 }
 
+function shoppingCandidate(item) {
+  const text = `${item.item_type || ''} ${item.title || ''}`;
+  return /activity|shopping|관광|관람|체험|명소|공원|박물관|궁|성|거리|광장/i.test(text) && !/공항|항공|숙소|호텔|식사|점심|저녁|아침|체크인|체크아웃/i.test(text);
+}
+
+function cleanShopping(suggestions) {
+  if (!Array.isArray(suggestions)) return [];
+  return suggestions.filter(x => x && String(x.name || x.shop_name || x.title || x.place || '').trim()).map(x => ({
+    name: String(x.name || x.shop_name || x.title || x.place).trim(),
+    category: String(x.category || x.type || '쇼핑').trim(),
+    recommended_items: String(x.recommended_items || x.items || x.what_to_buy || '').trim() || null,
+    travel_mode: String(x.travel_mode || x.transport || '도보').trim(),
+    travel_minutes: validNumber(x.travel_minutes) ?? validNumber(x.walk_minutes),
+    distance_km: validNumber(x.distance_km),
+    notes: String(x.notes || x.tip || x.reason || '').trim() || null,
+  })).slice(0, 3);
+}
+
+function fallbackShopping(item) {
+  if (!shoppingCandidate(item)) return [];
+  const key = `${trip.destination || ''} ${item.place || ''} ${item.title || ''}`;
+  let places = [];
+  if (/유니버설|universal/i.test(key)) places = [['Universal CityWalk Beijing','테마파크 쇼핑','캐릭터 상품·기념품'],['UNIVERSAL STUDIOS STORE','공식 굿즈','영화·캐릭터 공식 상품'],['POP MART CityWalk 매장','아트토이','한정판 피규어·아트토이']];
+  else if (/베이징|북경|beijing/i.test(key)) places = [['왕푸징 보행거리','쇼핑거리','베이징 기념품·백화점 상품'],['첸먼 다스란 거리','전통상점가','차·과자·전통 공예품'],['시단 상업거리','복합 쇼핑','패션·생활용품']];
+  else if (/도쿄|tokyo/i.test(key)) places = [['도쿄역 캐릭터 스트리트','캐릭터 상품','한정 굿즈'],['긴자 미츠코시','백화점','화장품·식품·패션'],['도큐 플라자 긴자','복합 쇼핑','패션·잡화']];
+  else if (/오사카|osaka/i.test(key)) places = [['신사이바시스지 상점가','쇼핑거리','패션·드럭스토어 상품'],['난바 파크스','복합 쇼핑몰','패션·생활용품'],['도톤보리 돈키호테','종합 할인점','기념품·생활용품']];
+  else if (/파리|paris/i.test(key)) places = [['Galeries Lafayette Haussmann','백화점','패션·화장품'],['Le Bon Marché','백화점','디자이너 상품·식품'],['Rue de Rivoli','쇼핑거리','패션·기념품']];
+  else if (/제주|jeju/i.test(key)) places = [['제주동문시장','전통시장','감귤 제품·제주 먹거리'],['제주 기념품샵 바이제주','기념품점','제주 디자인 소품'],['칠성로 쇼핑거리','쇼핑거리','패션·생활용품']];
+  return places.map((x, index) => ({ name:x[0], category:x[1], recommended_items:x[2], travel_mode:index < 2 ? '도보' : '택시/대중교통', travel_minutes:8 + index * 7, distance_km:Number((0.6 + index * 0.7).toFixed(1)), notes:'영업시간과 재고는 방문 전 확인' }));
+}
+
 function needsGeneratedEnrichment(item) {
   const missingMove = item.item_type !== 'flight' && (!item.transport || validNumber(item.travel_duration_min) == null);
-  return missingMove || cleanRestaurants(item.restaurant_suggestions).length < 3;
+  const missingShopping = shoppingCandidate(item) && cleanShopping(item.shopping_suggestions).length < 2;
+  return missingMove || cleanRestaurants(item.restaurant_suggestions).length < 3 || missingShopping;
 }
 
 async function geocodeForPlan(value) {
@@ -266,12 +298,13 @@ async function enrichGeneratedRows(rows, transports, session) {
       }
     }
     item.restaurant_suggestions = cleanRestaurants(item.restaurant_suggestions);
+    item.shopping_suggestions = cleanShopping(item.shopping_suggestions);
     if (needsGeneratedEnrichment(item)) {
       try {
         const response = await fetch(ENR, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', apikey: K, Authorization: 'Bearer ' + session.access_token },
-          body: JSON.stringify({ destination: trip.destination, start_date: trip.start_date, end_date: trip.end_date, previous, current: { title: item.title, place: item.place, item_type: item.item_type, transport: item.transport, notes: [item.notes, '이전 장소부터 이동수단·거리·소요시간·교통비를 채우고, 현재 장소 주변의 실명 맛집을 최소 3곳 추천하되 각 맛집까지 이동수단·거리·소요시간을 포함할 것'].filter(Boolean).join(' · ') } }),
+          body: JSON.stringify({ destination: trip.destination, start_date: trip.start_date, end_date: trip.end_date, previous, current: { title: item.title, place: item.place, item_type: item.item_type, transport: item.transport, notes: [item.notes, '이전 장소부터 이동수단·거리·소요시간·교통비를 채우고, 현재 장소 주변의 실명 맛집을 최소 3곳 추천하되 각 맛집까지 이동수단·거리·소요시간을 포함할 것', shoppingCandidate(item) ? '주요 관광지 주변에 적절한 쇼핑 장소가 있으면 2~3곳과 추천 품목·이동수단·소요시간·거리를 포함할 것' : '쇼핑 추천이 적절하지 않으면 빈 배열로 둘 것'].filter(Boolean).join(' · ') } }),
         });
         const result = await response.json();
         if (!response.ok) throw Error(result.error || result.detail || '자동 보강 실패');
@@ -286,6 +319,8 @@ async function enrichGeneratedRows(rows, transports, session) {
         item.meal_type = value.meal_type || item.meal_type || null;
         const restaurants = cleanRestaurants(value.restaurant_suggestions);
         if (restaurants.length) item.restaurant_suggestions = restaurants;
+        const shopping = cleanShopping(value.shopping_suggestions);
+        if (shopping.length) item.shopping_suggestions = shopping;
         if (value.notes_append) item.notes = [item.notes, value.notes_append].filter(Boolean).join(' · ');
         completed += 1;
       } catch (error) {
@@ -311,6 +346,11 @@ async function enrichGeneratedRows(rows, transports, session) {
       const names = new Set(item.restaurant_suggestions.map(x => x.name));
       for (const restaurant of mappedRestaurants) if (!names.has(restaurant.name)) { item.restaurant_suggestions.push(restaurant); names.add(restaurant.name); }
       item.restaurant_suggestions = item.restaurant_suggestions.slice(0, 3);
+    }
+    if (shoppingCandidate(item) && item.shopping_suggestions.length < 2) {
+      const names = new Set(item.shopping_suggestions.map(x => x.name));
+      for (const place of fallbackShopping(item)) if (!names.has(place.name)) { item.shopping_suggestions.push(place); names.add(place.name); }
+      item.shopping_suggestions = item.shopping_suggestions.slice(0, 3);
     }
     if (item.restaurant_suggestions.length < 3) {
       const names = new Set(item.restaurant_suggestions.map(x => x.name));
@@ -415,6 +455,7 @@ async function regenerateTripAi() {
           currency: item.currency || move.currency || plan.currency || null,
           meal_type: item.meal_type || null,
           restaurant_suggestions: item.restaurant_suggestions || [],
+          shopping_suggestions: item.shopping_suggestions || [],
           notes: item.notes || null,
           sort_order: index,
         });
