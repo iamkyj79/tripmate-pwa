@@ -165,13 +165,69 @@ function cleanRestaurants(restaurants) {
     estimated_price_per_person: validNumber(x.estimated_price_per_person),
     currency: String(x.currency || '').trim() || null,
     walk_minutes: validNumber(x.walk_minutes),
+    travel_mode: String(x.travel_mode || x.transport || '도보').trim(),
+    travel_minutes: validNumber(x.travel_minutes) ?? validNumber(x.walk_minutes),
+    distance_km: validNumber(x.distance_km),
   })).slice(0, 3);
 }
 
 function needsGeneratedEnrichment(item) {
   const missingMove = item.item_type !== 'flight' && (!item.transport || validNumber(item.travel_duration_min) == null);
-  const isMeal = item.item_type === 'meal' || Boolean(item.meal_type) || /식사|점심|저녁|아침|맛집|restaurant/i.test(`${item.title || ''} ${item.notes || ''}`);
-  return missingMove || (isMeal && cleanRestaurants(item.restaurant_suggestions).length === 0);
+  return missingMove || cleanRestaurants(item.restaurant_suggestions).length < 3;
+}
+
+async function geocodeForPlan(value) {
+  if (!value) return null;
+  try {
+    const query = [value.place, value.title, trip.destination].filter(Boolean).join(', ');
+    const response = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(query), { headers: { 'Accept-Language': 'ko' } });
+    const data = await response.json();
+    return data?.[0] ? [Number(data[0].lat), Number(data[0].lon)] : null;
+  } catch (_) { return null; }
+}
+
+function directDistanceKm(a, b) {
+  const rad = n => n * Math.PI / 180;
+  const dLat = rad(b[0] - a[0]);
+  const dLon = rad(b[1] - a[1]);
+  const q = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a[0])) * Math.cos(rad(b[0])) * Math.sin(dLon / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(q), Math.sqrt(1 - q));
+}
+
+async function mapMovement(previous, current) {
+  const from = await geocodeForPlan(previous);
+  const to = await geocodeForPlan(current);
+  if (!from || !to) return null;
+  const straight = directDistanceKm(from, to);
+  const walking = straight <= 1.2;
+  try {
+    const route = await routeGeometry([from, to], walking ? 'walking' : 'driving');
+    const distance = Number(route.distance || 0) / 1000;
+    const minutes = Math.max(1, Math.round(Number(route.duration || 0) / 60));
+    return { position: to, transport: walking ? '도보' : '택시', travel_duration_min: minutes, travel_distance_km: Number(distance.toFixed(1)), travel_cost: walking ? 0 : Math.ceil((13 + Math.max(0, distance - 3) * 2.3) / 5) * 5 };
+  } catch (_) {
+    const distance = Number((straight * 1.25).toFixed(1));
+    return { position: to, transport: walking ? '도보' : '택시', travel_duration_min: Math.max(1, Math.round(distance / (walking ? 4.5 : 22) * 60)), travel_distance_km: distance, travel_cost: walking ? 0 : Math.ceil((13 + Math.max(0, distance - 3) * 2.3) / 5) * 5 };
+  }
+}
+
+async function mapRestaurants(item, knownPosition) {
+  const position = knownPosition || await geocodeForPlan(item);
+  if (!position) return [];
+  try {
+    const query = `[out:json][timeout:20];(node["amenity"="restaurant"]["name"](around:1800,${position[0]},${position[1]});way["amenity"="restaurant"]["name"](around:1800,${position[0]},${position[1]}););out center 12;`;
+    const response = await fetch('https://overpass-api.de/api/interpreter', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'data=' + encodeURIComponent(query) });
+    if (!response.ok) return [];
+    const data = await response.json();
+    return (data.elements || []).map(value => {
+      const lat = Number(value.lat ?? value.center?.lat);
+      const lon = Number(value.lon ?? value.center?.lon);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon) || !value.tags?.name) return null;
+      const distance = directDistanceKm(position, [lat, lon]) * 1.2;
+      const walking = distance <= 1.2;
+      return { name: value.tags['name:ko'] || value.tags.name, cuisine: value.tags.cuisine || '현지 음식', estimated_price_per_person: null, currency: null, walk_minutes: walking ? Math.max(1, Math.round(distance / 4.5 * 60)) : null, travel_mode: walking ? '도보' : '택시', travel_minutes: Math.max(1, Math.round(distance / (walking ? 4.5 : 20) * 60)), distance_km: Number(distance.toFixed(1)) };
+    }).filter(Boolean).sort((a, b) => a.distance_km - b.distance_km).slice(0, 3);
+  } catch (_) { return []; }
 }
 
 async function enrichGeneratedRows(rows, transports, session) {
@@ -193,7 +249,7 @@ async function enrichGeneratedRows(rows, transports, session) {
         const response = await fetch(ENR, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', apikey: K, Authorization: 'Bearer ' + session.access_token },
-          body: JSON.stringify({ destination: trip.destination, start_date: trip.start_date, end_date: trip.end_date, previous, current: { title: item.title, place: item.place, item_type: item.item_type, transport: item.transport, notes: item.notes } }),
+          body: JSON.stringify({ destination: trip.destination, start_date: trip.start_date, end_date: trip.end_date, previous, current: { title: item.title, place: item.place, item_type: item.item_type, transport: item.transport, notes: [item.notes, '이전 장소부터 이동수단·거리·소요시간·교통비를 채우고, 현재 장소 주변의 실명 맛집을 최소 3곳 추천하되 각 맛집까지 이동수단·거리·소요시간을 포함할 것'].filter(Boolean).join(' · ') } }),
         });
         const result = await response.json();
         if (!response.ok) throw Error(result.error || result.detail || '자동 보강 실패');
@@ -213,6 +269,20 @@ async function enrichGeneratedRows(rows, transports, session) {
       } catch (error) {
         console.warn('[tripmate] itinerary enrichment failed', { title: item.title, error: String(error) });
       }
+    }
+    const mapped = previous ? await mapMovement(previous, item) : null;
+    if (mapped) {
+      item.transport = item.transport || mapped.transport;
+      item.travel_duration_min = validNumber(item.travel_duration_min) ?? mapped.travel_duration_min;
+      item.travel_distance_km = validNumber(item.travel_distance_km) ?? mapped.travel_distance_km;
+      item.travel_cost = validNumber(item.travel_cost) ?? mapped.travel_cost;
+      item.currency = item.currency || 'CNY';
+    }
+    if (item.restaurant_suggestions.length < 3) {
+      const mappedRestaurants = await mapRestaurants(item, mapped?.position);
+      const names = new Set(item.restaurant_suggestions.map(x => x.name));
+      for (const restaurant of mappedRestaurants) if (!names.has(restaurant.name)) { item.restaurant_suggestions.push(restaurant); names.add(restaurant.name); }
+      item.restaurant_suggestions = item.restaurant_suggestions.slice(0, 3);
     }
     previous = item;
   }
@@ -331,6 +401,8 @@ async function regenerateTripAi() {
       const enriched = await enrichGeneratedRows(rows, transports, session);
       rows = enriched.rows;
       console.info('[tripmate] generated itinerary enrichment complete', { requested: rows.length, completed: enriched.completed });
+      const incomplete = rows.filter(item => !item.transport || validNumber(item.travel_duration_min) == null || validNumber(item.travel_distance_km) == null || validNumber(item.travel_cost) == null || cleanRestaurants(item.restaurant_suggestions).length < 3);
+      if (incomplete.length) throw Error(`이동정보 또는 주변 맛집 3곳을 완성하지 못한 일정: ${incomplete.map(item => item.title).join(', ')}. 잠시 후 다시 생성해 주세요.`);
     }
 
     const { error: deleteError } = await sb.from('itinerary_items').delete().eq('trip_id', trip.id);
