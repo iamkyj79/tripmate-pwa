@@ -1,3 +1,26 @@
+function screenPdfBreakpoints(target,canvasHeight){
+  const root=target.getBoundingClientRect(),ratio=canvasHeight/Math.max(1,target.scrollHeight);
+  const selectors=['.item','.panel','.kpirow','.restaurants','.shopping','.routesummary','.routeleg','.memobox','.schedule-managebar','h2','h3'];
+  const points=new Set([0,canvasHeight]);
+  target.querySelectorAll(selectors.join(',')).forEach(el=>{
+    const rect=el.getBoundingClientRect(),top=(rect.top-root.top+target.scrollTop)*ratio,bottom=(rect.bottom-root.top+target.scrollTop)*ratio;
+    if(top>0&&top<canvasHeight)points.add(Math.round(top));
+    if(bottom>0&&bottom<canvasHeight)points.add(Math.round(bottom));
+  });
+  return [...points].sort((a,b)=>a-b);
+}
+function screenPdfSlices(target,canvasHeight,idealHeight){
+  const points=screenPdfBreakpoints(target,canvasHeight),slices=[];let start=0;
+  while(start<canvasHeight){
+    const ideal=Math.min(canvasHeight,start+idealHeight);if(ideal===canvasHeight){slices.push([start,canvasHeight-start]);break}
+    // Prefer a shorter page over cutting a complete card in half.
+    const minimum=start+idealHeight*.22;
+    const safe=points.filter(value=>value>=minimum&&value<=ideal-8).pop();
+    const end=safe&&safe>start?safe:ideal;
+    slices.push([start,end-start]);start=end;
+  }
+  return slices;
+}
 async function exportScreenPdf(){
   const btn=$('screenPdfExport');
   const oldText=btn?.textContent;
@@ -52,9 +75,9 @@ async function exportScreenPdf(){
       pdf.addImage(imgData,'JPEG',margin,margin,imgW,imgH,undefined,'FAST');
     }else{
       const pxPerPage=Math.floor(canvas.width*(usableH/usableW));
-      let y=0,page=0;
-      while(y<canvas.height){
-        const sliceH=Math.min(pxPerPage,canvas.height-y);
+      const slices=screenPdfSlices(target,canvas.height,pxPerPage);
+      let page=0;
+      for(const [y,sliceH] of slices){
         const slice=document.createElement('canvas');
         slice.width=canvas.width;
         slice.height=sliceH;
@@ -65,7 +88,7 @@ async function exportScreenPdf(){
         const sliceMmH=sliceH*imgW/canvas.width;
         if(page>0)pdf.addPage();
         pdf.addImage(sliceData,'JPEG',margin,margin,imgW,sliceMmH,undefined,'FAST');
-        y+=sliceH;page++;
+        page++;
       }
     }
     pdf.save(`${trip?.title||'TRIPMATE'}_현재화면.pdf`);
