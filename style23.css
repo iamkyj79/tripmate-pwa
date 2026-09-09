@@ -1,0 +1,9 @@
+/* v42: multiple attraction guides within one itinerary item */
+.place-guide{display:grid;gap:18px;padding:16px;overflow:visible}
+.place-guide-card{background:#f4f8fd;border:1px solid #cfdeee;border-radius:18px;overflow:hidden}
+.combined-guide-heading{display:flex;justify-content:space-between;gap:12px;align-items:center;background:#173a63;color:#fff;border-radius:14px;padding:14px 17px}
+.combined-guide-heading span{font-size:13px;font-weight:800;color:#a9d2ff}
+.guide-sequence{display:flex;align-items:center;gap:10px;background:#fff;padding:13px 18px;color:#173a63}
+.guide-sequence span{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:#2f6fd6;color:#fff;font-weight:900}
+.guide-final-check{margin:0}
+@media(max-width:650px){.place-guide{padding:9px}.combined-guide-heading{align-items:flex-start;flex-direction:column}.guide-sequence{padding:11px 13px}}
