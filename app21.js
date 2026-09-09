@@ -3,6 +3,22 @@ let tripDestinationContextPromise = null;
 let tripDestinationContextKey = '';
 let lastGeocodeRequestAt = 0;
 
+function mapStopName(item) {
+  const raw = String(item.place || item.title || '일정').replace(/\s*\([^)]*\)\s*/g, ' ').trim();
+  return raw.length > 14 ? raw.slice(0, 14) + '…' : raw;
+}
+
+function numberedMapIcon(number, selected) {
+  return L.divIcon({
+    className: 'numbered-map-marker-wrap',
+    html: `<div class="numbered-map-marker ${selected ? 'selected-stop' : ''}"><span>${number}</span></div>`,
+    iconSize: [34, 42],
+    iconAnchor: [17, 40],
+    popupAnchor: [0, -38],
+    tooltipAnchor: [0, -34],
+  });
+}
+
 function geoDistanceKm(a, b) {
   const rad = n => n * Math.PI / 180;
   const dLat = rad(b[0] - a[0]), dLon = rad(b[1] - a[1]);
