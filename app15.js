@@ -10,6 +10,87 @@ function itineraryMinute(day, time) {
   return (dayNo - 1) * 1440 + hour * 60 + minute;
 }
 
+function minuteToItinerary(value) {
+  const maximum = Math.max(1, Number(trip?.days || 1)) * 1440 - 1;
+  const bounded = Math.max(0, Math.min(maximum, Math.round(value)));
+  const dayNo = Math.floor(bounded / 1440) + 1;
+  const minutes = bounded % 1440;
+  return { day_no: dayNo, start_time: String(Math.floor(minutes / 60)).padStart(2, '0') + ':' + String(minutes % 60).padStart(2, '0') };
+}
+
+async function cascadeAfterEdit(oldItem, newItem) {
+  if (!oldItem?.id) return 0;
+  const oldStart = itineraryMinute(oldItem.day_no, oldItem.start_time);
+  const newStart = itineraryMinute(newItem.day_no, newItem.start_time);
+  if (oldStart == null || newStart == null) return 0;
+  const delta = (newStart + Number(newItem.travel_duration_min || 0)) - (oldStart + Number(oldItem.travel_duration_min || 0));
+  if (!delta) return 0;
+  const [{ data: items, error: itemError }, { data: transports, error: transportError }] = await Promise.all([
+    sb.from('itinerary_items').select('id,day_no,start_time,sort_order,item_type').eq('trip_id', trip.id).order('day_no').order('sort_order'),
+    sb.from('trip_transports').select('itinerary_item_id').eq('trip_id', trip.id),
+  ]);
+  if (itemError) throw itemError;
+  if (transportError) throw transportError;
+  const fixedIds = new Set((transports || []).map(x => x.itinerary_item_id).filter(Boolean));
+  const index = (items || []).findIndex(x => x.id === oldItem.id);
+  if (index < 0) return 0;
+  let changed = 0;
+  for (let i = index + 1; i < items.length; i += 1) {
+    const item = items[i];
+    if (fixedIds.has(item.id)) break;
+    const start = itineraryMinute(item.day_no, item.start_time);
+    if (start == null) continue;
+    const { error } = await sb.from('itinerary_items').update(minuteToItinerary(start + delta)).eq('id', item.id);
+    if (error) throw error;
+    changed += 1;
+  }
+  return changed;
+}
+
+async function saveI() {
+  try {
+    const userInfo = await need();
+    if (!$('ititle').value.trim()) throw Error('일정명을 입력하세요');
+    if ($('itype').value !== 'flight' && (!$('idur').value || $('icost').value === '')) {
+      try { await enrich(true); } catch (error) { console.warn('[tripmate] manual enrichment failed', error); }
+    }
+    const numberOrNull = id => $(id).value === '' ? null : Number($(id).value);
+    let payload = {
+      day_no: Number($('iday').value), start_time: $('itime').value || null, item_type: $('itype').value,
+      title: $('ititle').value.trim(), place: $('iplace').value.trim() || null,
+      transport: $('itrans').value.trim() || null, travel_duration_min: numberOrNull('idur'),
+      travel_distance_km: numberOrNull('idist'), travel_cost: numberOrNull('ifare'), estimated_cost: numberOrNull('icost'),
+      currency: $('icur').value.trim() || null, meal_type: $('imeal').value || null,
+      restaurant_suggestions: window._rests || [], airline: $('iair')?.value || null,
+      flight_number: $('ifn')?.value || null, departure_airport: $('ida')?.value || null,
+      arrival_airport: $('iaa')?.value || null, departure_terminal: $('idt')?.value || null,
+      arrival_terminal: $('iat')?.value || null, seat: $('iseat')?.value || null,
+      booking_reference: $('ibref')?.value || null,
+      departure_at: $('idat')?.value ? new Date($('idat').value).toISOString() : null,
+      arrival_at: $('iaat')?.value ? new Date($('iaat').value).toISOString() : null,
+      notes: $('inotes').value.trim() || null,
+    };
+    const id = $('iid').value;
+    if (id) {
+      const { data: oldItem, error: readError } = await sb.from('itinerary_items').select('*').eq('id', id).single();
+      if (readError) throw readError;
+      const { error } = await sb.from('itinerary_items').update(payload).eq('id', id);
+      if (error) throw error;
+      await cascadeAfterEdit(oldItem, { ...oldItem, ...payload });
+    } else {
+      const { data: last } = await sb.from('itinerary_items').select('sort_order').eq('trip_id', trip.id).eq('day_no', payload.day_no).order('sort_order', { ascending: false }).limit(1);
+      payload = { ...payload, user_id: userInfo.id, trip_id: trip.id, sort_order: (last?.[0]?.sort_order ?? -1) + 1 };
+      const { error } = await sb.from('itinerary_items').insert(payload);
+      if (error) throw error;
+    }
+    window._rests = [];
+    closeScheduleModal();
+    await renderIt();
+  } catch (error) {
+    M('imsg', error.message, 'error');
+  }
+}
+
 function transportLocal(item, key) {
   return item[key + '_local'] || toLocalInput(item[key + '_at']) || '';
 }
@@ -68,6 +149,74 @@ function anchorFromTransport(item, userInfo) {
 function isAiTransportDuplicate(item) {
   const text = `${item.title || ''} ${item.place || ''}`.toLowerCase();
   return item.item_type === 'flight' || /공항|airport|항공|비행|입국|출국|수속/.test(text);
+}
+
+function validNumber(value) {
+  if (value == null || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function cleanRestaurants(restaurants) {
+  if (!Array.isArray(restaurants)) return [];
+  return restaurants.filter(x => x && String(x.name || '').trim()).map(x => ({
+    name: String(x.name).trim(),
+    cuisine: String(x.cuisine || '').trim() || null,
+    estimated_price_per_person: validNumber(x.estimated_price_per_person),
+    currency: String(x.currency || '').trim() || null,
+    walk_minutes: validNumber(x.walk_minutes),
+  })).slice(0, 3);
+}
+
+function needsGeneratedEnrichment(item) {
+  const missingMove = item.item_type !== 'flight' && (!item.transport || validNumber(item.travel_duration_min) == null);
+  const isMeal = item.item_type === 'meal' || Boolean(item.meal_type) || /식사|점심|저녁|아침|맛집|restaurant/i.test(`${item.title || ''} ${item.notes || ''}`);
+  return missingMove || (isMeal && cleanRestaurants(item.restaurant_suggestions).length === 0);
+}
+
+async function enrichGeneratedRows(rows, transports, session) {
+  const ordered = [...rows].sort((a, b) => a.day_no - b.day_no || a.sort_order - b.sort_order);
+  const firstAnchor = transports.find(x => x.direction === 'outbound');
+  let previousDay = null;
+  let previous = firstAnchor ? anchorFromTransport(firstAnchor, { id: ordered[0]?.user_id || '' }) : null;
+  let completed = 0;
+  for (const item of ordered) {
+    if (previousDay !== item.day_no) {
+      previousDay = item.day_no;
+      if (item.day_no !== 1) {
+        previous = trip.lodging_name || trip.lodging_address ? { title: trip.lodging_name || '숙소', place: trip.lodging_address || trip.lodging_name, item_type: 'lodging' } : null;
+      }
+    }
+    item.restaurant_suggestions = cleanRestaurants(item.restaurant_suggestions);
+    if (needsGeneratedEnrichment(item)) {
+      try {
+        const response = await fetch(ENR, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', apikey: K, Authorization: 'Bearer ' + session.access_token },
+          body: JSON.stringify({ destination: trip.destination, start_date: trip.start_date, end_date: trip.end_date, previous, current: { title: item.title, place: item.place, item_type: item.item_type, transport: item.transport, notes: item.notes } }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw Error(result.error || result.detail || '자동 보강 실패');
+        const value = result.enrichment || {};
+        item.item_type = value.item_type || item.item_type;
+        item.transport = value.transport || item.transport || null;
+        item.travel_duration_min = validNumber(value.travel_duration_min) ?? validNumber(item.travel_duration_min);
+        item.travel_distance_km = validNumber(value.travel_distance_km) ?? validNumber(item.travel_distance_km);
+        item.travel_cost = validNumber(value.travel_cost) ?? validNumber(item.travel_cost);
+        item.estimated_cost = validNumber(value.estimated_cost) ?? validNumber(item.estimated_cost);
+        item.currency = value.currency || item.currency || null;
+        item.meal_type = value.meal_type || item.meal_type || null;
+        const restaurants = cleanRestaurants(value.restaurant_suggestions);
+        if (restaurants.length) item.restaurant_suggestions = restaurants;
+        if (value.notes_append) item.notes = [item.notes, value.notes_append].filter(Boolean).join(' · ');
+        completed += 1;
+      } catch (error) {
+        console.warn('[tripmate] itinerary enrichment failed', { title: item.title, error: String(error) });
+      }
+    }
+    previous = item;
+  }
+  return { rows: ordered, completed };
 }
 
 async function regenerateTripAi() {
@@ -176,6 +325,13 @@ async function regenerateTripAi() {
       rows = rows.filter(x => itineraryMinute(x.day_no, x.start_time) <= maximum);
     }
     if (!rows.length && !transports.length) throw Error('AI가 생성한 유효한 일정이 없습니다. 다시 시도해 주세요.');
+
+    if (rows.length) {
+      M('regenMsg', `일정 ${rows.length}개의 이동시간·예상비용·주변 맛집을 자동 보강하고 있습니다...`);
+      const enriched = await enrichGeneratedRows(rows, transports, session);
+      rows = enriched.rows;
+      console.info('[tripmate] generated itinerary enrichment complete', { requested: rows.length, completed: enriched.completed });
+    }
 
     const { error: deleteError } = await sb.from('itinerary_items').delete().eq('trip_id', trip.id);
     if (deleteError) throw deleteError;
