@@ -157,6 +157,11 @@ function validNumber(value) {
   return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
+function validMovementNumber(value) {
+  const number = validNumber(value);
+  return number != null && number > 0 ? number : null;
+}
+
 function cleanRestaurants(restaurants) {
   if (!Array.isArray(restaurants)) return [];
   return restaurants.filter(x => x && String(x.name || x.restaurant_name || x.title || x.place || '').trim()).map(x => ({
@@ -235,6 +240,10 @@ function needsGeneratedEnrichment(item) {
 async function geocodeForPlan(value) {
   if (!value) return null;
   try {
+    if (typeof knownDestinationPoint === 'function') {
+      const known = knownDestinationPoint(value);
+      if (known) return known;
+    }
     const query = [value.place, value.title, trip.destination].filter(Boolean).join(', ');
     const response = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(query), { headers: { 'Accept-Language': 'ko' } });
     const data = await response.json();
@@ -332,16 +341,16 @@ async function enrichGeneratedRows(rows, transports, session) {
     const mapped = previous ? await mapMovement(previous, item) : null;
     if (mapped) {
       item.transport = item.transport || mapped.transport;
-      item.travel_duration_min = validNumber(item.travel_duration_min) ?? mapped.travel_duration_min;
-      item.travel_distance_km = validNumber(item.travel_distance_km) ?? mapped.travel_distance_km;
-      item.travel_cost = validNumber(item.travel_cost) ?? mapped.travel_cost;
+      item.travel_duration_min = validMovementNumber(item.travel_duration_min) ?? mapped.travel_duration_min;
+      item.travel_distance_km = validMovementNumber(item.travel_distance_km) ?? mapped.travel_distance_km;
+      item.travel_cost = /도보|walk/i.test(item.transport || mapped.transport) ? (validNumber(item.travel_cost) ?? 0) : (validMovementNumber(item.travel_cost) ?? mapped.travel_cost);
       item.currency = item.currency || 'CNY';
     }
     if (item.item_type !== 'flight') {
       item.transport = item.transport || (previous ? '택시/대중교통' : '이동 없음');
-      item.travel_duration_min = validNumber(item.travel_duration_min) ?? (previous ? 30 : 0);
-      item.travel_distance_km = validNumber(item.travel_distance_km) ?? (previous ? 5 : 0);
-      item.travel_cost = validNumber(item.travel_cost) ?? (previous ? 30 : 0);
+      item.travel_duration_min = previous ? (validMovementNumber(item.travel_duration_min) ?? 30) : (validNumber(item.travel_duration_min) ?? 0);
+      item.travel_distance_km = previous ? (validMovementNumber(item.travel_distance_km) ?? 5) : (validNumber(item.travel_distance_km) ?? 0);
+      item.travel_cost = /도보|walk/i.test(item.transport || '') ? (validNumber(item.travel_cost) ?? 0) : (previous ? (validMovementNumber(item.travel_cost) ?? 30) : (validNumber(item.travel_cost) ?? 0));
     }
     if (item.restaurant_suggestions.length < 3) {
       const mappedRestaurants = await mapRestaurants(item, mapped?.position);
