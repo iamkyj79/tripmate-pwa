@@ -42,3 +42,6 @@ home=async function(){
   $('hn').textContent=upcoming[0]?.destination||'-';
   renderUpcomingTrips(upcoming,true);
 };
+
+// app14 initializes the page before this override is loaded, so refresh once with the final renderer.
+home();
