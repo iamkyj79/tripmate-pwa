@@ -1,4 +1,4 @@
-// v33: complete itinerary display with movement cost and three nearby restaurants.
+// v37: complete itinerary display with movement cost, restaurants and nearby shopping.
 async function renderIt() {
   const { data, error } = await sb.from('itinerary_items').select('*').eq('trip_id', trip.id).order('day_no').order('sort_order');
   if (error) {
@@ -8,6 +8,7 @@ async function renderIt() {
   const rows = data || [];
   $('tabbody').innerHTML = '<div id="iform"></div>' + rows.map(item => {
     const restaurants = cleanRestaurants(item.restaurant_suggestions);
+    const shopping = cleanShopping(item.shopping_suggestions);
     const route = item.item_type === 'flight'
       ? `<div class="route">✈ ${e(item.airline || '')} ${e(item.flight_number || '항공편')} · ${e(item.departure_airport || '-')} → ${e(item.arrival_airport || '-')}</div>`
       : item.travel_duration_min != null
@@ -18,7 +19,12 @@ async function renderIt() {
       const travel = restaurant.travel_minutes != null ? ` · ${e(restaurant.travel_mode || '도보')} 약 ${e(restaurant.travel_minutes)}분${restaurant.distance_km != null ? ` (${e(restaurant.distance_km)}km)` : ''}` : '';
       return `<li><b>${e(restaurant.name)}</b>${restaurant.cuisine ? ` · ${e(restaurant.cuisine)}` : ''}${price}${travel}</li>`;
     }).join('')}</ol></div>` : '';
-    return `<div class="item"><div class="row"><div><b>Day ${item.day_no} · ${(item.start_time || '').slice(0, 5)} · ${e(item.title)}</b><div class="muted">${e(item.place || '')}</div></div><div class="actions"><button class="small" onclick="memoI('${item.id}')">메모</button><button class="small" onclick="editI('${item.id}')">수정</button><button class="small danger" onclick="delI('${item.id}')">삭제</button></div></div>${route}<div class="chips">${item.estimated_cost != null ? `<span class="chip">예상 이용금액 ${e(item.estimated_cost)} ${e(item.currency || '')}</span>` : ''}${item.meal_type ? `<span class="chip">🍽 ${e(item.meal_type)}</span>` : ''}</div>${item.user_memo ? `<div class="memobox"><b>📝 내 메모</b><div>${e(item.user_memo)}</div></div>` : ''}${restaurantBlock}</div>`;
+    const shoppingBlock = shopping.length ? `<div class="shopping"><b>주변 쇼핑 추천 ${shopping.length}곳</b><ol>${shopping.map(place => {
+      const items = place.recommended_items ? ` · 추천 ${e(place.recommended_items)}` : '';
+      const travel = place.travel_minutes != null ? ` · ${e(place.travel_mode || '도보')} 약 ${e(place.travel_minutes)}분${place.distance_km != null ? ` (${e(place.distance_km)}km)` : ''}` : '';
+      return `<li><b>${e(place.name)}</b>${place.category ? ` · ${e(place.category)}` : ''}${items}${travel}${place.notes ? `<div class="muted">${e(place.notes)}</div>` : ''}</li>`;
+    }).join('')}</ol></div>` : '';
+    return `<div class="item"><div class="row"><div><b>Day ${item.day_no} · ${(item.start_time || '').slice(0, 5)} · ${e(item.title)}</b><div class="muted">${e(item.place || '')}</div></div><div class="actions"><button class="small" onclick="memoI('${item.id}')">메모</button><button class="small" onclick="editI('${item.id}')">수정</button><button class="small danger" onclick="delI('${item.id}')">삭제</button></div></div>${route}<div class="chips">${item.estimated_cost != null ? `<span class="chip">예상 이용금액 ${e(item.estimated_cost)} ${e(item.currency || '')}</span>` : ''}${item.meal_type ? `<span class="chip">🍽 ${e(item.meal_type)}</span>` : ''}</div>${item.user_memo ? `<div class="memobox"><b>📝 내 메모</b><div>${e(item.user_memo)}</div></div>` : ''}${restaurantBlock}${shoppingBlock}</div>`;
   }).join('');
   window._i = rows;
 }
