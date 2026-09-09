@@ -168,6 +168,7 @@ function cleanRestaurants(restaurants) {
     travel_mode: String(x.travel_mode || x.transport || '도보').trim(),
     travel_minutes: validNumber(x.travel_minutes) ?? validNumber(x.walk_minutes),
     distance_km: validNumber(x.distance_km),
+    selected: x.selected === true,
   })).slice(0, 3);
 }
 
@@ -208,6 +209,7 @@ function cleanShopping(suggestions) {
     travel_minutes: validNumber(x.travel_minutes) ?? validNumber(x.walk_minutes),
     distance_km: validNumber(x.distance_km),
     notes: String(x.notes || x.tip || x.reason || '').trim() || null,
+    selected: x.selected === true,
   })).slice(0, 3);
 }
 
