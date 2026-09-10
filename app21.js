@@ -65,7 +65,7 @@ function knownDestinationPoint(item) {
     [/자금성|고궁|forbidden city|palace museum/i,[39.9163,116.3972]],
     [/왕푸징|wangfujing/i,[39.9146,116.4126]],
     [/천단|temple of heaven/i,[39.8822,116.4066]],
-    [/유니버설|universal/i,[39.8530,116.6740]],
+    [/유니버[설셜]|universal|环球度假区/i,[39.8530,116.6740]],
     [/이화원|summer palace/i,[39.9999,116.2755]],
     [/무톈위|모전욕|mutianyu/i,[40.4319,116.5704]],
     [/난뤄구샹|남라고상|nanluoguxiang/i,[39.9370,116.4030]],
@@ -83,7 +83,7 @@ function destinationAliases(item) {
     [/자금성|고궁|forbidden city|palace museum/i,'故宫博物院, Forbidden City Beijing'],
     [/왕푸징|wangfujing/i,'王府井步行街, Wangfujing Beijing'],
     [/천단|temple of heaven/i,'天坛公园, Temple of Heaven Beijing'],
-    [/유니버설|universal/i,'北京环球度假区, Universal Beijing Resort'],
+    [/유니버[설셜]|universal|环球度假区/i,'北京环球度假区, Universal Beijing Resort'],
     [/이화원|summer palace/i,'颐和园, Summer Palace Beijing'],
     [/무톈위|모전욕|mutianyu/i,'慕田峪长城, Mutianyu Great Wall'],
     [/난뤄구샹|남라고상|nanluoguxiang/i,'南锣鼓巷, Nanluoguxiang Beijing'],
@@ -96,9 +96,11 @@ function destinationAliases(item) {
 geocodeItem = async function(item) {
   const context = await tripDestinationContext();
   const stored = item.latitude != null && item.longitude != null ? [Number(item.latitude), Number(item.longitude)] : null;
-  if (stored && (!context || geoDistanceKm(context, stored) <= 500)) return stored;
+  const verified = knownDestinationPoint(item);
+  if (verified && stored && geoDistanceKm(verified, stored) <= 1.5) return stored;
+  if (!verified && stored && (!context || geoDistanceKm(context, stored) <= 500)) return stored;
   if (stored) { item.latitude = null; item.longitude = null; }
-  let point = knownDestinationPoint(item);
+  let point = verified;
   if (!point) {
     const queries = [
       destinationAliases(item),
