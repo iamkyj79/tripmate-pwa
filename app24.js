@@ -6,6 +6,7 @@ const PLACE_LOOKUPS={
   '자금성 전경 감상':{ko:'자금성',en:'Forbidden City',zh:'故宫'},
   '이화원':{ko:'이화원',en:'Summer Palace',zh:'颐和园'},
   '유니버설 베이징 리조트':{ko:'유니버설 스튜디오 베이징',en:'Universal Studios Beijing',zh:'北京环球度假区'},
+  '무톈위 만리장성':{ko:'무톈위',en:'Mutianyu',zh:'慕田峪长城'},
   '전문대가리·다스란':{ko:'전문대가',en:'Qianmen',zh:'前门大街'},
   '왕푸징 거리':{ko:'왕푸징',en:'Wangfujing',zh:'王府井'},
   '천단공원':{ko:'천단',en:'Temple of Heaven',zh:'天坛'},
@@ -13,6 +14,7 @@ const PLACE_LOOKUPS={
 const VERIFIED_PLACE_IMAGES={
   '이화원':'https://upload.wikimedia.org/wikipedia/commons/d/db/Longevity_Hill_of_the_Summer_Palace.jpg',
   '유니버설 베이징 리조트':'https://upload.wikimedia.org/wikipedia/commons/c/c6/Beijing_universal_entrance.jpg',
+  '무톈위 만리장성':'https://upload.wikimedia.org/wikipedia/commons/f/fa/Great_Wall_of_China_July_2006.JPG',
 };
 
 function cleanGuidePlaceName(value){
