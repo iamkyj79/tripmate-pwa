@@ -1,0 +1,26 @@
+{
+  "name": "TRIP:MATE 여행 플래너",
+  "short_name": "TRIP:MATE",
+  "description": "여행 일정·지도·예약·경비를 한곳에서 관리하는 여행 플래너",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#fffaf5",
+  "theme_color": "#ff6b4a",
+  "lang": "ko-KR",
+  "icons": [
+    {
+      "src": "/tripmate-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/tripmate-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}
