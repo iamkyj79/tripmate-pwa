@@ -5,14 +5,14 @@ const PLACE_LOOKUPS={
   '경산공원(징산공원)':{ko:'징산 공원',en:'Jingshan Park',zh:'景山公园'},
   '자금성 전경 감상':{ko:'자금성',en:'Forbidden City',zh:'故宫'},
   '이화원':{ko:'이화원',en:'Summer Palace',zh:'颐和园'},
-  '유니버설 베이징 리조트':{ko:'유니버설 베이징 리조트',en:'Universal Beijing Resort',zh:'北京环球度假区'},
+  '유니버설 베이징 리조트':{ko:'유니버설 스튜디오 베이징',en:'Universal Studios Beijing',zh:'北京环球度假区'},
   '전문대가리·다스란':{ko:'전문대가',en:'Qianmen',zh:'前门大街'},
   '왕푸징 거리':{ko:'왕푸징',en:'Wangfujing',zh:'王府井'},
   '천단공원':{ko:'천단',en:'Temple of Heaven',zh:'天坛'},
 };
 const VERIFIED_PLACE_IMAGES={
   '이화원':'https://upload.wikimedia.org/wikipedia/commons/d/db/Longevity_Hill_of_the_Summer_Palace.jpg',
-  '유니버설 베이징 리조트':'https://img.traveldaily.cn/images/202505/f1202a7682d6e46a.png',
+  '유니버설 베이징 리조트':'https://upload.wikimedia.org/wikipedia/commons/c/c6/Beijing_universal_entrance.jpg',
 };
 
 function cleanGuidePlaceName(value){
