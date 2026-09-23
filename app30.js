@@ -92,8 +92,9 @@
   function shortenUndoLabel() {
     const button = document.getElementById('restoreFullItinerary');
     if (!button) return;
-    if (button.textContent.includes('복구 중')) button.textContent = '복구 중...';
-    else if (button.textContent.includes('전체 일정') || button.textContent.includes('돌아가기')) button.textContent = '↩️ 돌아가기';
+    const current = button.textContent.trim();
+    if (current.includes('복구 중') && current !== '복구 중...') button.textContent = '복구 중...';
+    else if (current !== '↩️ 돌아가기' && (current.includes('전체 일정') || current.includes('돌아가기'))) button.textContent = '↩️ 돌아가기';
   }
 
   const nativeFetch = window.fetch.bind(window);
